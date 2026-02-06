@@ -3,14 +3,14 @@ import * as THREE from 'three';
 import { 
   Settings2, Sun, Moon, RotateCw, Globe, 
   Zap, Palette, Maximize2, Activity, Languages,
-  Hash, Shield, Cpu, Wind
+  Hash, Shield, Cpu, Wind, Clock, Compass, Grid
 } from 'lucide-react';
 
 /**
- * CONFIG: システム設定
+ * CONFIG: システム設定 (保守運用五則 第2条：設定の外部化)
  */
 const CONFIG = {
-  VERSION: "2.9.1-ALPHA",
+  VERSION_NAME: "V.3.1.1-ZEITGEIST",
   TAG_COLORS: {
     '環境': { h: 180, s: 80, l: 50 },
     '身体': { h: 300, s: 80, l: 50 },
@@ -31,11 +31,14 @@ const CONFIG = {
       luminance: "輝度",
       pointSize: "粒子サイズ",
       gridDensity: "グリッド密度",
+      gridOpacity: "グリッド明度",
       rotationSpeed: "自転同期係数",
       status: "ステータス: 稼働中",
       rotationMatch: "惑星自転: 同期済",
       rotationAccel: "時間加速: アクティブ",
-      desc: "極めて希少な精神標本の記録"
+      desc: "極めて希少な精神標本の記録",
+      clockMode: "時計モード",
+      gyroActive: "加速度同期: 有効"
     },
     en: {
       title: "G.E.D.A. DUAL SYNC ARCHIVE",
@@ -45,11 +48,14 @@ const CONFIG = {
       luminance: "Luminance",
       pointSize: "Point Magnitude",
       gridDensity: "Grid Density",
+      gridOpacity: "Grid Luminance",
       rotationSpeed: "Rotation Sync",
       status: "Status: Active",
       rotationMatch: "Planetary Rotation: Matched",
       rotationAccel: "Temporal Acceleration: Active",
-      desc: "Preservation of Rare Mental Specimens"
+      desc: "Preservation of Rare Mental Specimens",
+      clockMode: "Clock Mode",
+      gyroActive: "Gyro Sync: Active"
     }
   },
   THEMES: {
@@ -70,20 +76,56 @@ const CONFIG = {
   }
 };
 
-const MassivePointsGlobe = ({ data, settings, theme }) => {
+/**
+ * 3D Globe Component with Interactivity (Drag & Gyro)
+ */
+const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
   const mountRef = useRef(null);
   const globeGroupRef = useRef(new THREE.Group());
+  const interactionGroupRef = useRef(new THREE.Group());
   const pointsRef = useRef(null);
   const globeMeshRef = useRef(null);
   const rendererRef = useRef(null);
+  const sceneRef = useRef(new THREE.Scene());
   const settingsRef = useRef(settings);
+  
+  const isDragging = useRef(false);
+  const previousMousePosition = useRef({ x: 0, y: 0 });
+  const gyroOffset = useRef({ x: 0, y: 0 });
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
+
+  // グリッド（ジオメトリ）の再生成ロジック
+  const updateGridGeometry = (density) => {
+    if (globeMeshRef.current) {
+      globeGroupRef.current.remove(globeMeshRef.current);
+      globeMeshRef.current.geometry.dispose();
+      globeMeshRef.current.material.dispose();
+    }
+    
+    // 密度が0なら生成しない
+    if (density <= 0) {
+      globeMeshRef.current = null;
+      return;
+    }
+
+    // 密度を分割数として利用 (Icosahedronのdetail)
+    const globeGeom = new THREE.IcosahedronGeometry(CONFIG.GLOBE_RADIUS, Math.floor(density));
+    const globeMat = new THREE.MeshBasicMaterial({
+      color: CONFIG.THEMES[theme].gridColor,
+      wireframe: true,
+      transparent: true,
+      opacity: settingsRef.current.gridOpacity
+    });
+    const globeMesh = new THREE.Mesh(globeGeom, globeMat);
+    globeMeshRef.current = globeMesh;
+    globeGroupRef.current.add(globeMesh);
+  };
 
   useEffect(() => {
     const width = mountRef.current.clientWidth;
     const height = mountRef.current.clientHeight;
-    const scene = new THREE.Scene();
+    const scene = sceneRef.current;
     const camera = new THREE.PerspectiveCamera(45, width / height, 1, 2000);
     camera.position.z = CONFIG.CAMERA_DIST;
 
@@ -93,21 +135,13 @@ const MassivePointsGlobe = ({ data, settings, theme }) => {
     mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    scene.add(globeGroupRef.current);
+    scene.add(interactionGroupRef.current);
+    interactionGroupRef.current.add(globeGroupRef.current);
 
-    // ジオメトリ生成
-    const globeGeom = new THREE.IcosahedronGeometry(CONFIG.GLOBE_RADIUS, 15);
-    const globeMat = new THREE.MeshBasicMaterial({
-      color: CONFIG.THEMES[theme].gridColor,
-      wireframe: true,
-      transparent: true,
-      opacity: settings.gridOpacity
-    });
-    const globeMesh = new THREE.Mesh(globeGeom, globeMat);
-    globeMeshRef.current = globeMesh;
-    globeGroupRef.current.add(globeMesh);
+    // 初回グリッド生成
+    updateGridGeometry(settings.gridDensity);
 
-    // 点群
+    // ポイント生成
     const positions = [];
     const colors = [];
     const latLngToVector3 = (lat, lng, radius) => {
@@ -145,13 +179,56 @@ const MassivePointsGlobe = ({ data, settings, theme }) => {
     pointsRef.current = points;
     globeGroupRef.current.add(points);
 
-    // アニメーション
+    // インタラクション
+    const handleOrientation = (event) => {
+      if (!gyroEnabled) return;
+      const x = event.beta;
+      const y = event.gamma;
+      if (x !== null && y !== null) {
+        gyroOffset.current.x = x * 0.01;
+        gyroOffset.current.y = y * 0.01;
+      }
+    };
+    window.addEventListener('deviceorientation', handleOrientation);
+
+    const onMouseDown = (e) => {
+      isDragging.current = true;
+      previousMousePosition.current = { 
+        x: e.clientX || e.touches?.[0].clientX, 
+        y: e.clientY || e.touches?.[0].clientY 
+      };
+    };
+    const onMouseMove = (e) => {
+      if (!isDragging.current) return;
+      const clientX = e.clientX || e.touches?.[0].clientX;
+      const clientY = e.clientY || e.touches?.[0].clientY;
+      const deltaX = clientX - previousMousePosition.current.x;
+      const deltaY = clientY - previousMousePosition.current.y;
+      
+      interactionGroupRef.current.rotation.y += deltaX * 0.005;
+      interactionGroupRef.current.rotation.x += deltaY * 0.005;
+      
+      previousMousePosition.current = { x: clientX, y: clientY };
+    };
+    const onMouseUp = () => { isDragging.current = false; };
+
+    mountRef.current.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    mountRef.current.addEventListener('touchstart', onMouseDown);
+    window.addEventListener('touchmove', onMouseMove);
+    window.addEventListener('touchend', onMouseUp);
+
     let frameId;
     const animate = () => {
       frameId = requestAnimationFrame(animate);
       const speed = settingsRef.current.rotationSpeed * CONFIG.EARTH_ROT_BASE;
       globeGroupRef.current.rotation.y += speed;
-      globeGroupRef.current.rotation.x += speed * 0.1;
+
+      if (gyroEnabled) {
+        interactionGroupRef.current.rotation.x += (gyroOffset.current.x - interactionGroupRef.current.rotation.x) * 0.05;
+        interactionGroupRef.current.rotation.y += (gyroOffset.current.y - interactionGroupRef.current.rotation.y) * 0.05;
+      }
       renderer.render(scene, camera);
     };
     animate();
@@ -167,12 +244,22 @@ const MassivePointsGlobe = ({ data, settings, theme }) => {
     return () => {
       cancelAnimationFrame(frameId);
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('deviceorientation', handleOrientation);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('touchmove', onMouseMove);
+      window.removeEventListener('touchend', onMouseUp);
       renderer.dispose();
     };
-  }, [data]);
+  }, [data, gyroEnabled]);
+
+  // 設定更新時の動的反映 (密度変更時はジオメトリ再生成)
+  useEffect(() => {
+    updateGridGeometry(settings.gridDensity);
+  }, [settings.gridDensity]);
 
   useEffect(() => {
-    if (!pointsRef.current || !globeMeshRef.current) return;
+    if (!pointsRef.current) return;
     const colorsAttr = pointsRef.current.geometry.attributes.color;
     data.forEach((item, i) => {
       const base = CONFIG.TAG_COLORS[item.tags[0]] || CONFIG.TAG_COLORS.default;
@@ -182,25 +269,89 @@ const MassivePointsGlobe = ({ data, settings, theme }) => {
     });
     colorsAttr.needsUpdate = true;
     pointsRef.current.material.size = settings.pointSize;
-    globeMeshRef.current.material.opacity = settings.gridOpacity;
-    globeMeshRef.current.material.color.setHex(CONFIG.THEMES[theme].gridColor);
+    
+    if (globeMeshRef.current) {
+      globeMeshRef.current.material.opacity = settings.gridOpacity;
+      globeMeshRef.current.material.color.setHex(CONFIG.THEMES[theme].gridColor);
+    }
   }, [settings.saturation, settings.luminance, settings.pointSize, settings.gridOpacity, theme, data]);
 
-  return <div ref={mountRef} className="w-full h-full cursor-crosshair" />;
+  return <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />;
 };
 
+/**
+ * Clock Component (精密時計)
+ */
+const PrecisionClock = ({ theme, isClockMode }) => {
+  const [time, setTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setTime(new Date()), 10);
+    return () => clearInterval(timer);
+  }, []);
+
+  const format = (d) => {
+    const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    return {
+      date: `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`,
+      day: days[d.getDay()],
+      h: String(d.getHours()).padStart(2, '0'),
+      m: String(d.getMinutes()).padStart(2, '0'),
+      s: String(d.getSeconds()).padStart(2, '0'),
+      ms: String(Math.floor(d.getMilliseconds() / 10)).padStart(2, '0')
+    };
+  };
+
+  const f = format(time);
+
+  if (!isClockMode) {
+    return (
+      <div className={`font-mono text-[9px] tracking-[0.3em] flex items-center gap-2 opacity-60 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+        <span>{f.date}</span>
+        <span className="opacity-30">|</span>
+        <span className="font-bold">{f.h}:{f.m}:{f.s}</span>
+        <span className="text-cyan-500 font-bold">{f.ms}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex flex-col items-center justify-center font-mono tracking-[0.2em] transition-all duration-1000 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+      <div className="flex gap-4 text-[12px] opacity-40 mb-2">
+        <span>{f.date}</span>
+        <span className="text-cyan-500 font-bold tracking-[0.5em]">{f.day}</span>
+      </div>
+      <div className="flex items-baseline gap-1">
+        <span className="text-6xl font-black">{f.h}</span>
+        <span className="text-3xl opacity-30">:</span>
+        <span className="text-6xl font-black">{f.m}</span>
+        <span className="text-3xl opacity-30">:</span>
+        <span className="text-6xl font-black">{f.s}</span>
+        <span className="text-2xl ml-4 text-cyan-500 font-bold w-16">{f.ms}</span>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Main Application
+ */
 const App = () => {
   const [theme, setTheme] = useState('dark');
   const [lang, setLang] = useState('jp');
   const [activeTab, setActiveTab] = useState('visual');
   const [showPanel, setShowPanel] = useState(false);
+  const [clockMode, setClockMode] = useState(false);
+  const [gyroEnabled, setGyroEnabled] = useState(false);
+
   const [settings, setSettings] = useState({
-    pointSize: 3.2,
-    luminance: 1.2,
-    saturation: 1.0,
+    pointSize: 3.5,
+    luminance: 1.5,
+    saturation: 1.2,
     opacity: 0.8,
     rotationSpeed: 1.0,
-    gridOpacity: 0.15
+    gridOpacity: 0.15,
+    gridDensity: 15 // Icosahedron detail
   });
 
   const t = CONFIG.LANG[lang];
@@ -216,14 +367,28 @@ const App = () => {
     { id: "S-107", tags: ["環境"], location: { lat: -23.5, lng: -46.6 }, val: "0.12" },
   ], []);
 
+  const requestGyro = async () => {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const response = await DeviceOrientationEvent.requestPermission();
+        if (response === 'granted') setGyroEnabled(true);
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      setGyroEnabled(!gyroEnabled);
+    }
+  };
+
   return (
-    <div className={`fixed inset-0 font-sans transition-colors duration-1000 overflow-hidden select-none`} style={{ background: currentTheme.bg }}>
+    <div className={`fixed inset-0 font-sans transition-all duration-1000 overflow-hidden select-none`} style={{ background: currentTheme.bg }}>
       
       {/* 背景装飾 */}
-      <div className="absolute inset-0 opacity-20 pointer-events-none" 
-           style={{ backgroundImage: `radial-gradient(${theme === 'dark' ? '#ffffff22' : '#00000011'} 1px, transparent 0)`, backgroundSize: '40px 40px' }} />
+      <div className="absolute inset-0 opacity-10 pointer-events-none" 
+           style={{ backgroundImage: `radial-gradient(${theme === 'dark' ? '#ffffff22' : '#00000011'} 1px, transparent 0)`, backgroundSize: '60px 60px' }} />
 
-      <header className="absolute top-0 w-full flex items-start justify-between p-10 z-50">
+      {/* Header UI */}
+      <header className={`absolute top-0 w-full flex items-start justify-between p-10 z-50 transition-opacity duration-1000 ${clockMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <div className="space-y-1">
           <div className="flex items-center gap-4">
             <div className={`w-3 h-3 ${theme === 'dark' ? 'bg-cyan-500 shadow-[0_0_15px_#06b6d4]' : 'bg-blue-600'} rounded-full animate-pulse`} />
@@ -231,14 +396,11 @@ const App = () => {
               {t.title}
             </h1>
           </div>
-          <div className="flex items-center gap-6 mt-4">
-            <div className={`text-[10px] tracking-[0.2em] font-mono opacity-60 flex items-center gap-2 ${currentTheme.text}`}>
-              <Hash size={12} className="text-cyan-500" /> V.{CONFIG.VERSION}
+          <div className="flex items-center gap-6 mt-4 opacity-40">
+             <div className={`text-[10px] tracking-[0.2em] font-mono flex items-center gap-2 ${currentTheme.text}`}>
+              <Hash size={12} className="text-cyan-500" /> {CONFIG.VERSION_NAME}
             </div>
-            <div className={`text-[10px] tracking-[0.2em] font-mono opacity-60 flex items-center gap-2 ${currentTheme.text}`}>
-              <Shield size={12} className="text-cyan-500" /> {t.status}
-            </div>
-            <div className={`text-[10px] tracking-[0.2em] italic opacity-40 ${currentTheme.text}`}>
+            <div className={`text-[10px] tracking-[0.2em] italic ${currentTheme.text}`}>
                // {t.desc}
             </div>
           </div>
@@ -260,7 +422,12 @@ const App = () => {
         </div>
       </header>
 
-      {/* 調整パネル */}
+      {/* Main Display Area (Clock Mode) */}
+      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 transition-all duration-1000 ${clockMode ? 'scale-100 opacity-100' : 'scale-75 opacity-0 pointer-events-none'}`}>
+        <PrecisionClock theme={theme} isClockMode={true} />
+      </div>
+
+      {/* Control Panel */}
       <div className={`absolute top-28 right-10 w-80 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl z-50 transition-all duration-700 ease-out overflow-hidden ${showPanel ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0 pointer-events-none'} ${currentTheme.ui} ${currentTheme.text}`}>
         <div className="p-8">
           <div className="flex gap-8 mb-10">
@@ -277,77 +444,64 @@ const App = () => {
             {activeTab === 'visual' ? (
               <>
                 <SliderItem label={t.saturation} icon={<Palette size={14}/>} value={settings.saturation} min={0} max={2} step={0.01}
-                  onChange={v => setSettings(s => ({...s, saturation: v}))} theme={theme} />
+                  onChange={v => setSettings(s => ({...s, saturation: v}))} />
                 <SliderItem label={t.luminance} icon={<Zap size={14}/>} value={settings.luminance} min={0.5} max={2.5} step={0.01}
-                  onChange={v => setSettings(s => ({...s, luminance: v}))} theme={theme} />
+                  onChange={v => setSettings(s => ({...s, luminance: v}))} />
                 <SliderItem label={t.pointSize} icon={<Maximize2 size={14}/>} value={settings.pointSize} min={0.5} max={10} step={0.1}
-                  onChange={v => setSettings(s => ({...s, pointSize: v}))} theme={theme} />
-                <SliderItem label={t.gridDensity} icon={<Globe size={14}/>} value={settings.gridOpacity} min={0} max={0.5} step={0.01}
-                  onChange={v => setSettings(s => ({...s, gridOpacity: v}))} theme={theme} />
+                  onChange={v => setSettings(s => ({...s, pointSize: v}))} />
+                <SliderItem label={t.gridDensity} icon={<Grid size={14}/>} value={settings.gridDensity} min={0} max={30} step={1}
+                  onChange={v => setSettings(s => ({...s, gridDensity: v}))} />
+                <SliderItem label={t.gridOpacity} icon={<Globe size={14}/>} value={settings.gridOpacity} min={0} max={0.6} step={0.01}
+                  onChange={v => setSettings(s => ({...s, gridOpacity: v}))} />
               </>
             ) : (
-              <SliderItem label={t.rotationSpeed} icon={<RotateCw size={14}/>} value={settings.rotationSpeed} min={1} max={5000} step={1}
-                onChange={v => setSettings(s => ({...s, rotationSpeed: v}))} theme={theme} />
+              <>
+                <SliderItem label={t.rotationSpeed} icon={<RotateCw size={14}/>} value={settings.rotationSpeed} min={1} max={5000} step={1}
+                  onChange={v => setSettings(s => ({...s, rotationSpeed: v}))} />
+                <div className="flex flex-col gap-4">
+                  <ToggleButton label={t.gyroActive} active={gyroEnabled} icon={<Compass size={14}/>} onClick={requestGyro} />
+                </div>
+              </>
             )}
           </div>
         </div>
-        <div className="bg-white/5 p-4 text-center">
-           <p className="text-[9px] opacity-30 tracking-widest font-mono uppercase">Synchronization Interface v2.9</p>
-        </div>
       </div>
 
-      <MassivePointsGlobe data={archiveData} settings={settings} theme={theme} />
+      {/* Earth Core */}
+      <MassivePointsGlobe data={archiveData} settings={settings} theme={theme} gyroEnabled={gyroEnabled} />
 
-      {/* 左下のステータス */}
-      <footer className="absolute bottom-12 left-12 z-50 pointer-events-none">
+      {/* Footer Controls & Small Clock */}
+      <footer className="absolute bottom-12 left-12 z-50 flex items-end gap-10">
         <div className="space-y-6">
-          <div className="flex gap-4">
-            <div className={`p-4 backdrop-blur-2xl rounded-2xl border border-white/5 ${currentTheme.ui}`}>
-               <div className="flex items-center gap-3">
-                 <Cpu size={14} className="text-cyan-500" />
-                 <span className={`text-[10px] font-mono tracking-widest ${currentTheme.text}`}>
-                   CORE_SYNC: {settings.rotationSpeed === 1.0 ? "STABLE" : "OVERDRIVE"}
-                 </span>
-               </div>
-            </div>
-            <div className={`p-4 backdrop-blur-2xl rounded-2xl border border-white/5 ${currentTheme.ui}`}>
-               <div className="flex items-center gap-3">
-                 <Wind size={14} className="text-purple-500" />
-                 <span className={`text-[10px] font-mono tracking-widest ${currentTheme.text}`}>
-                   OSCILLATION: {settings.luminance.toFixed(2)}
-                 </span>
-               </div>
-            </div>
+          <div className={`p-4 backdrop-blur-2xl rounded-2xl border border-white/5 flex items-center gap-6 transition-all duration-1000 ${clockMode ? 'opacity-20 translate-y-4' : 'opacity-100'} ${currentTheme.ui}`}>
+             <div className="flex items-center gap-3">
+               <Cpu size={14} className="text-cyan-500" />
+               <span className={`text-[10px] font-mono tracking-widest ${currentTheme.text}`}>
+                 CORE: {settings.rotationSpeed.toFixed(0)}
+               </span>
+             </div>
+             <div className="w-[1px] h-4 bg-white/10" />
+             
+             {/* 画面隅の極小時計 */}
+             <PrecisionClock theme={theme} isClockMode={false} />
           </div>
 
-          <div className="border-l-[3px] border-cyan-500 pl-6 py-2 transition-all duration-500">
+          <div className={`border-l-[3px] border-cyan-500 pl-6 py-1 transition-all duration-1000 ${clockMode ? 'opacity-0' : 'opacity-100'}`}>
             <div className={`text-xs font-bold font-mono tracking-[0.25em] ${currentTheme.text}`}>
               {settings.rotationSpeed === 1.0 ? t.rotationMatch : t.rotationAccel}
-            </div>
-            <div className="flex gap-6 mt-4 opacity-40">
-              {Object.keys(CONFIG.TAG_COLORS).filter(k => k !== 'default').map(tag => (
-                <div key={tag} className="flex items-center gap-2 group transition-opacity hover:opacity-100">
-                  <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]" style={{ backgroundColor: `hsl(${CONFIG.TAG_COLORS[tag].h}, 80%, 60%)`, color: `hsl(${CONFIG.TAG_COLORS[tag].h}, 80%, 60%)` }} />
-                  <span className={`text-[9px] font-bold uppercase tracking-widest ${currentTheme.text}`}>{tag}</span>
-                </div>
-              ))}
             </div>
           </div>
         </div>
       </footer>
 
-      {/* 右下のアーカイブリスト */}
-      <div className="absolute bottom-12 right-12 z-50 text-right opacity-30 hover:opacity-100 transition-opacity duration-700 hidden lg:block">
-         <div className="space-y-1">
-           {archiveData.map(d => (
-             <div key={d.id} className={`text-[8px] font-mono tracking-tighter ${currentTheme.text} flex items-center justify-end gap-2`}>
-               <span>{d.id}</span>
-               <span className="w-12 h-[1px] bg-current opacity-20" />
-               <span className="opacity-60">LAT:{d.location.lat} LNG:{d.location.lng}</span>
-               <span className="text-cyan-500 font-bold">[{d.val}]</span>
-             </div>
-           ))}
-         </div>
+      {/* Mode Switcher */}
+      <div className="absolute bottom-12 right-12 z-50 flex items-center gap-6">
+        <button 
+          onClick={() => setClockMode(!clockMode)}
+          className={`flex items-center gap-3 px-6 py-3 rounded-full backdrop-blur-3xl border border-white/10 transition-all ${clockMode ? 'bg-cyan-500 text-white border-none shadow-lg shadow-cyan-500/30' : currentTheme.text + ' ' + currentTheme.ui}`}>
+          <Clock size={16} />
+          <span className="text-[10px] font-bold tracking-[0.2em] uppercase">{t.clockMode}</span>
+        </button>
       </div>
 
       <style>{`
@@ -366,28 +520,32 @@ const App = () => {
           background: #06b6d4;
           box-shadow: 0 0 10px #06b6d488;
           cursor: pointer;
-          transition: transform 0.2s;
         }
-        input[type='range']::-webkit-slider-thumb:hover {
-          transform: scale(1.2);
-        }
+        body { margin: 0; padding: 0; background: black; }
       `}</style>
     </div>
   );
 };
 
-const SliderItem = ({ label, icon, value, min, max, step, onChange, theme }) => (
+const SliderItem = ({ label, icon, value, min, max, step, onChange }) => (
   <div className="group">
     <div className="flex justify-between items-center text-[10px] tracking-[0.2em] uppercase opacity-40 group-hover:opacity-100 transition-opacity mb-4">
       <span className="flex items-center gap-3">{icon} {label}</span>
       <span className="font-mono text-cyan-400 font-bold">{value >= 1000 ? (value/1000).toFixed(1) + "k" : value.toFixed(1)}</span>
     </div>
-    <div className="relative flex items-center">
-      <input type="range" min={min} max={max} step={step} value={value}
-        onChange={e => onChange(parseFloat(e.target.value))}
-        className="w-full h-[2px] bg-current/10 rounded-full appearance-none cursor-pointer accent-cyan-500" />
-    </div>
+    <input type="range" min={min} max={max} step={step} value={value}
+      onChange={e => onChange(parseFloat(e.target.value))}
+      className="w-full h-[2px] bg-current/10 rounded-full appearance-none cursor-pointer accent-cyan-500" />
   </div>
+);
+
+const ToggleButton = ({ label, icon, active, onClick }) => (
+  <button onClick={onClick} className={`flex items-center justify-between w-full p-4 rounded-2xl border transition-all ${active ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400' : 'border-white/5 opacity-40 hover:opacity-100'}`}>
+    <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest">
+      {icon} {label}
+    </div>
+    <div className={`w-2 h-2 rounded-full ${active ? 'bg-cyan-400 animate-pulse' : 'bg-white/20'}`} />
+  </button>
 );
 
 export default App;
