@@ -10,7 +10,7 @@ import {
  * CONFIG: システム設定 (保守運用五則 第2条：設定の外部化)
  */
 const CONFIG = {
-  VERSION_NAME: "V.3.1.1-ZEITGEIST",
+  VERSION_NAME: "V.3.1.2-ZEITGEIST",
   TAG_COLORS: {
     '環境': { h: 180, s: 80, l: 50 },
     '身体': { h: 300, s: 80, l: 50 },
@@ -22,6 +22,8 @@ const CONFIG = {
   GLOBE_RADIUS: 100,
   CAMERA_DIST: 280,
   EARTH_ROT_BASE: 0.0000012,
+  FRICTION: 0.95, // 慣性の摩擦係数
+  RETURN_LERP: 0.02, // 定常速度への復帰係数
   LANG: {
     jp: {
       title: "G.E.D.A. デュアル・シンクロ・アーカイブ",
@@ -77,7 +79,7 @@ const CONFIG = {
 };
 
 /**
- * 3D Globe Component with Interactivity (Drag & Gyro)
+ * 3D Globe Component with Interactivity (Drag with Inertia & Gyro)
  */
 const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
   const mountRef = useRef(null);
@@ -89,27 +91,24 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
   const sceneRef = useRef(new THREE.Scene());
   const settingsRef = useRef(settings);
   
+  // 物理挙動用リファレンス
   const isDragging = useRef(false);
   const previousMousePosition = useRef({ x: 0, y: 0 });
+  const velocity = useRef({ x: 0, y: 0 }); // ドラッグによる回転速度
   const gyroOffset = useRef({ x: 0, y: 0 });
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
 
-  // グリッド（ジオメトリ）の再生成ロジック
   const updateGridGeometry = (density) => {
     if (globeMeshRef.current) {
       globeGroupRef.current.remove(globeMeshRef.current);
       globeMeshRef.current.geometry.dispose();
       globeMeshRef.current.material.dispose();
     }
-    
-    // 密度が0なら生成しない
     if (density <= 0) {
       globeMeshRef.current = null;
       return;
     }
-
-    // 密度を分割数として利用 (Icosahedronのdetail)
     const globeGeom = new THREE.IcosahedronGeometry(CONFIG.GLOBE_RADIUS, Math.floor(density));
     const globeMat = new THREE.MeshBasicMaterial({
       color: CONFIG.THEMES[theme].gridColor,
@@ -138,10 +137,8 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
     scene.add(interactionGroupRef.current);
     interactionGroupRef.current.add(globeGroupRef.current);
 
-    // 初回グリッド生成
     updateGridGeometry(settings.gridDensity);
 
-    // ポイント生成
     const positions = [];
     const colors = [];
     const latLngToVector3 = (lat, lng, radius) => {
@@ -179,7 +176,6 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
     pointsRef.current = points;
     globeGroupRef.current.add(points);
 
-    // インタラクション
     const handleOrientation = (event) => {
       if (!gyroEnabled) return;
       const x = event.beta;
@@ -197,7 +193,9 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
         x: e.clientX || e.touches?.[0].clientX, 
         y: e.clientY || e.touches?.[0].clientY 
       };
+      velocity.current = { x: 0, y: 0 }; // タッチ開始時に速度リセット
     };
+
     const onMouseMove = (e) => {
       if (!isDragging.current) return;
       const clientX = e.clientX || e.touches?.[0].clientX;
@@ -205,30 +203,55 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
       const deltaX = clientX - previousMousePosition.current.x;
       const deltaY = clientY - previousMousePosition.current.y;
       
+      // 直接回転を加算
       interactionGroupRef.current.rotation.y += deltaX * 0.005;
       interactionGroupRef.current.rotation.x += deltaY * 0.005;
       
+      // 速度を蓄積
+      velocity.current = { x: deltaX * 0.005, y: deltaY * 0.005 };
+      
       previousMousePosition.current = { x: clientX, y: clientY };
     };
-    const onMouseUp = () => { isDragging.current = false; };
+
+    const onMouseUp = () => {
+      isDragging.current = false;
+    };
 
     mountRef.current.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     mountRef.current.addEventListener('touchstart', onMouseDown);
-    window.addEventListener('touchmove', onMouseMove);
+    window.addEventListener('touchmove', onMouseMove, { passive: false });
     window.addEventListener('touchend', onMouseUp);
 
     let frameId;
     const animate = () => {
       frameId = requestAnimationFrame(animate);
-      const speed = settingsRef.current.rotationSpeed * CONFIG.EARTH_ROT_BASE;
-      globeGroupRef.current.rotation.y += speed;
+      
+      // 1. 地球儀の自転（設定された定常速度）
+      const baseSpeed = settingsRef.current.rotationSpeed * CONFIG.EARTH_ROT_BASE;
+      globeGroupRef.current.rotation.y += baseSpeed;
 
+      // 2. ドラッグ慣性・復帰システム
+      if (!isDragging.current) {
+        // 慣性による回転の継続
+        interactionGroupRef.current.rotation.y += velocity.current.x;
+        interactionGroupRef.current.rotation.x += velocity.current.y;
+
+        // 摩擦による減衰
+        velocity.current.x *= CONFIG.FRICTION;
+        velocity.current.y *= CONFIG.FRICTION;
+
+        // X軸（垂直方向）の回転を徐々に0に戻す（水平自転に収束させるため）
+        interactionGroupRef.current.rotation.x *= (1 - CONFIG.RETURN_LERP);
+      }
+
+      // 3. ジャイロ同期
       if (gyroEnabled) {
         interactionGroupRef.current.rotation.x += (gyroOffset.current.x - interactionGroupRef.current.rotation.x) * 0.05;
         interactionGroupRef.current.rotation.y += (gyroOffset.current.y - interactionGroupRef.current.rotation.y) * 0.05;
       }
+
       renderer.render(scene, camera);
     };
     animate();
@@ -253,7 +276,6 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
     };
   }, [data, gyroEnabled]);
 
-  // 設定更新時の動的反映 (密度変更時はジオメトリ再生成)
   useEffect(() => {
     updateGridGeometry(settings.gridDensity);
   }, [settings.gridDensity]);
@@ -351,7 +373,7 @@ const App = () => {
     opacity: 0.8,
     rotationSpeed: 1.0,
     gridOpacity: 0.15,
-    gridDensity: 15 // Icosahedron detail
+    gridDensity: 15
   });
 
   const t = CONFIG.LANG[lang];
@@ -383,11 +405,9 @@ const App = () => {
   return (
     <div className={`fixed inset-0 font-sans transition-all duration-1000 overflow-hidden select-none`} style={{ background: currentTheme.bg }}>
       
-      {/* 背景装飾 */}
       <div className="absolute inset-0 opacity-10 pointer-events-none" 
            style={{ backgroundImage: `radial-gradient(${theme === 'dark' ? '#ffffff22' : '#00000011'} 1px, transparent 0)`, backgroundSize: '60px 60px' }} />
 
-      {/* Header UI */}
       <header className={`absolute top-0 w-full flex items-start justify-between p-10 z-50 transition-opacity duration-1000 ${clockMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <div className="space-y-1">
           <div className="flex items-center gap-4">
@@ -422,12 +442,10 @@ const App = () => {
         </div>
       </header>
 
-      {/* Main Display Area (Clock Mode) */}
       <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 transition-all duration-1000 ${clockMode ? 'scale-100 opacity-100' : 'scale-75 opacity-0 pointer-events-none'}`}>
         <PrecisionClock theme={theme} isClockMode={true} />
       </div>
 
-      {/* Control Panel */}
       <div className={`absolute top-28 right-10 w-80 backdrop-blur-3xl rounded-[32px] border border-white/10 shadow-2xl z-50 transition-all duration-700 ease-out overflow-hidden ${showPanel ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0 pointer-events-none'} ${currentTheme.ui} ${currentTheme.text}`}>
         <div className="p-8">
           <div className="flex gap-8 mb-10">
@@ -467,10 +485,8 @@ const App = () => {
         </div>
       </div>
 
-      {/* Earth Core */}
       <MassivePointsGlobe data={archiveData} settings={settings} theme={theme} gyroEnabled={gyroEnabled} />
 
-      {/* Footer Controls & Small Clock */}
       <footer className="absolute bottom-12 left-12 z-50 flex items-end gap-10">
         <div className="space-y-6">
           <div className={`p-4 backdrop-blur-2xl rounded-2xl border border-white/5 flex items-center gap-6 transition-all duration-1000 ${clockMode ? 'opacity-20 translate-y-4' : 'opacity-100'} ${currentTheme.ui}`}>
@@ -482,7 +498,6 @@ const App = () => {
              </div>
              <div className="w-[1px] h-4 bg-white/10" />
              
-             {/* 画面隅の極小時計 */}
              <PrecisionClock theme={theme} isClockMode={false} />
           </div>
 
@@ -494,7 +509,6 @@ const App = () => {
         </div>
       </footer>
 
-      {/* Mode Switcher */}
       <div className="absolute bottom-12 right-12 z-50 flex items-center gap-6">
         <button 
           onClick={() => setClockMode(!clockMode)}
@@ -521,7 +535,7 @@ const App = () => {
           box-shadow: 0 0 10px #06b6d488;
           cursor: pointer;
         }
-        body { margin: 0; padding: 0; background: black; }
+        body { margin: 0; padding: 0; background: black; touch-action: none; }
       `}</style>
     </div>
   );
