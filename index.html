@@ -1,2 +1,301 @@
-<!DOCTYPE html>
-<html lang="ja">
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { 
+  Sun, Moon, Share2, 
+  Hash, Activity, Shield, Terminal, PlayCircle, Eye,
+  Youtube, ChevronRight, Layers, Smartphone, ExternalLink,
+  Music2, MessageCircle, ArrowRight, Fingerprint, Clock,
+  Maximize2, Download, Check, Copy, AlertCircle
+} from 'lucide-react';
+
+const generateUserId = () => `GED-ID-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+
+const App = () => {
+  // SNS設定
+  const VIDEO_ID = "dQw4w9WgXcQ"; // YouTube Shorts ID
+  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [userId] = useState(generateUserId());
+  const [msTime, setMsTime] = useState("");
+  const [displayedTeigi, setDisplayedTeigi] = useState("");
+  const [activeTab, setActiveTab] = useState('observation'); // observation | archive | post
+  const [isCopied, setIsCopied] = useState(false);
+
+  const specimen = {
+    id: "KHJ-001",
+    title: "雨の予感",
+    titleYomi: "あめのよかん",
+    subtitle: "低気圧の到来に伴う皮膚の微動",
+    teigi: "湿度が閾値を超えた瞬間、肺の奥がわずかに重くなる現象。",
+    desc: "空の色が変わるよりも早く、粘膜が世界の変容を察知する。それは予知ではなく、環境との同調である。傘を持つべきかという実利的な判断の前に、動物としての境界線が揺らぐ感覚の記録。雨粒が地面を叩く音を聴く前から、身体はすでに重力の増大を予感している。",
+    tags: "気象 / 身体 / 境界",
+    lastWord: "「皮膚は、目よりも先に空を見ている。」",
+    resonance: 128
+  };
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      const format = (n, len = 2) => String(n).padStart(len, '0');
+      setMsTime(`${now.getFullYear()}.${format(now.getMonth() + 1)}.${format(now.getDate())} ${format(now.getHours())}:${format(now.getMinutes())}:${format(now.getSeconds())}.${format(now.getMilliseconds(), 3)}`);
+      requestAnimationFrame(updateTime);
+    };
+    const animId = requestAnimationFrame(updateTime);
+    return () => cancelAnimationFrame(animId);
+  }, []);
+
+  useEffect(() => {
+    let i = 0;
+    const interval = setInterval(() => {
+      setDisplayedTeigi(specimen.teigi.slice(0, i));
+      i++;
+      if (i > specimen.teigi.length) clearInterval(interval);
+    }, 40);
+    return () => clearInterval(interval);
+  }, []);
+
+  const copyToClipboard = () => {
+    const text = `空白辞典：[ ${specimen.title} ]\n定義：${specimen.teigi}\n#空白辞典 #GEDA #GED_ID_${userId}`;
+    const el = document.createElement('textarea');
+    el.value = text;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const theme = isDarkMode 
+    ? { bg: 'bg-[#050505]', text: 'text-[#b0b0b0]', border: 'border-white/10', accent: 'text-blue-500', card: 'bg-[#0a0a0a]' }
+    : { bg: 'bg-[#fafafa]', text: 'text-[#333]', border: 'border-black/10', accent: 'text-blue-600', card: 'bg-white' };
+
+  return (
+    <div className={`${theme.bg} ${theme.text} min-h-screen flex flex-col font-serif transition-colors duration-1000 overflow-x-hidden selection:bg-blue-500/20`}>
+      
+      {/* 1. Header (Monitoring Layer) */}
+      <header className={`sticky top-0 z-[100] h-16 border-b ${theme.border} backdrop-blur-xl flex items-center justify-between px-6 font-sans`}>
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col">
+            <span className="text-[10px] font-black tracking-[0.4em] uppercase italic">G.E.D.A. Archive</span>
+            <span className="text-[7px] opacity-30 tracking-[0.2em] uppercase font-mono">Sensory Observation Node-01</span>
+          </div>
+          <div className="hidden sm:flex items-center gap-3 border-l border-current/10 pl-6 opacity-40">
+            <Shield size={10} />
+            <span className="text-[8px] font-mono tracking-widest">{userId}</span>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-6">
+          <div className="text-[9px] font-mono opacity-40 tabular-nums tracking-wider uppercase">
+            {msTime}
+          </div>
+          <button onClick={() => setIsDarkMode(!isDarkMode)} className="opacity-30 hover:opacity-100 transition-all p-2">
+            {isDarkMode ? <Sun size={14} strokeWidth={1.5} /> : <Moon size={14} strokeWidth={1.5} />}
+          </button>
+        </div>
+      </header>
+
+      {/* 2. Main Terminal */}
+      <main className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+        
+        {/* Navigation Rail (Desktop Only) */}
+        <aside className="hidden lg:flex w-20 border-r border-white/5 flex-col items-center py-12 gap-12 opacity-40 hover:opacity-100 transition-opacity">
+          <button onClick={() => setActiveTab('observation')} className={`p-3 transition-all ${activeTab === 'observation' ? 'text-blue-500 bg-blue-500/5' : ''}`}>
+            <Eye size={18} strokeWidth={1} />
+          </button>
+          <button onClick={() => setActiveTab('archive')} className={`p-3 transition-all ${activeTab === 'archive' ? 'text-blue-500 bg-blue-500/5' : ''}`}>
+            <Layers size={18} strokeWidth={1} />
+          </button>
+          <button onClick={() => setActiveTab('post')} className={`p-3 transition-all ${activeTab === 'post' ? 'text-blue-500 bg-blue-500/5' : ''}`}>
+            <Share2 size={18} strokeWidth={1} />
+          </button>
+        </aside>
+
+        {/* Content Area */}
+        <div className="flex-1 flex flex-col lg:flex-row h-full">
+          
+          {/* Left: Specimen Details */}
+          <section className="flex-1 overflow-y-auto p-8 md:p-16 lg:p-24 flex flex-col justify-center relative">
+             <div className="max-w-2xl animate-fade-in">
+                <div className="mb-16">
+                  <div className="flex items-center gap-4 mb-6 opacity-30 font-sans">
+                    <span className="text-[9px] font-bold tracking-[0.5em] uppercase">Phase: Liquid</span>
+                    <div className="h-px w-12 bg-current"></div>
+                    <span className="text-[9px] font-mono uppercase tracking-tighter">REF: {specimen.id}</span>
+                  </div>
+                  <span className="text-[10px] tracking-[1.2em] opacity-30 italic block mb-6 uppercase leading-none">{specimen.titleYomi}</span>
+                  <h1 className="text-5xl md:text-7xl font-light tracking-[0.2em] mb-12 leading-tight">
+                    {specimen.title}
+                  </h1>
+                  <p className={`text-[10px] md:text-xs tracking-[0.6em] font-sans font-bold uppercase mb-8 ${theme.accent} opacity-60`}>
+                     {specimen.subtitle}
+                  </p>
+                </div>
+
+                <div className="relative mb-20 border-l border-blue-500/20 pl-10 py-2">
+                  <p className="text-2xl md:text-3xl leading-[2.2] font-light italic opacity-90">
+                    「{displayedTeigi}<span className="inline-block w-0.5 h-[1.1em] bg-blue-500 ml-1 align-middle animate-pulse"></span>」
+                  </p>
+                </div>
+
+                <div className="text-sm md:text-base leading-[2.8] font-light opacity-50 mb-20 font-serif max-w-lg">
+                  {specimen.desc}
+                </div>
+
+                <div className="flex flex-wrap gap-12 border-t border-current/5 pt-12 opacity-30 font-sans">
+                  <div className="flex flex-col gap-2">
+                    <span className="text-[8px] font-bold tracking-[0.5em] uppercase italic">Synapse Tags</span>
+                    <div className="flex items-center gap-2"><Hash size={10} /> <span className="text-[10px] tracking-widest">{specimen.tags}</span></div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <span className="text-[8px] font-bold tracking-[0.5em] uppercase italic">Resonance Level</span>
+                    <div className="flex items-center gap-2"><Activity size={10} /> <span className="text-[10px] tracking-widest">{specimen.resonance} / 1000</span></div>
+                  </div>
+                </div>
+             </div>
+          </section>
+
+          {/* Right: Multimedia Hub / Social Specimen Card */}
+          <section className={`lg:w-[500px] border-l ${theme.border} bg-current/[0.01] flex flex-col p-8 md:p-12 relative overflow-hidden`}>
+             
+             {/* Dynamic Video / Card Switcher */}
+             <div className="flex-1 flex flex-col justify-center items-center gap-12">
+                
+                {/* 縦長プレビュー（動画化を意識したアスペクト比） */}
+                <div className={`relative w-full aspect-[9/16] max-h-[65vh] shadow-[0_40px_100px_rgba(0,0,0,0.6)] rounded-[2.5rem] border-8 ${isDarkMode ? 'border-[#1a1a1a]' : 'border-white'} overflow-hidden bg-black group`}>
+                  {activeTab === 'observation' ? (
+                    <>
+                      <iframe
+                        className="w-full h-full object-cover grayscale-[0.4] group-hover:grayscale-0 transition-all duration-1000"
+                        src={`https://www.youtube.com/embed/${VIDEO_ID}?autoplay=1&mute=1&controls=0&loop=1&playlist=${VIDEO_ID}&modestbranding=1&rel=0`}
+                        title="Observation Feed"
+                        frameBorder="0"
+                        allow="autoplay; encrypted-media"
+                      ></iframe>
+                      <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-black/40 via-transparent to-black/80 p-8 flex flex-col justify-end">
+                         <div className="flex items-center gap-3 text-white/50 mb-4 animate-pulse">
+                            <Clock size={12} />
+                            <span className="text-[8px] font-mono uppercase tracking-widest">Live Monitoring...</span>
+                         </div>
+                         <div className="text-white/30 text-[7px] font-sans tracking-[0.8em] uppercase leading-relaxed">
+                            Specimen data synchronizing with global resonance nodes
+                         </div>
+                      </div>
+                    </>
+                  ) : (
+                    /* 投稿用カードプレビュー */
+                    <div className={`w-full h-full ${theme.card} p-10 flex flex-col animate-fade-in relative`}>
+                       {/* 四隅のL字アクセント */}
+                       <div className="absolute top-6 left-6 w-6 h-6 border-t border-l border-blue-500/40"></div>
+                       <div className="absolute top-6 right-6 w-6 h-6 border-t border-r border-blue-500/40"></div>
+                       <div className="absolute bottom-6 left-6 w-6 h-6 border-b border-l border-blue-500/40"></div>
+                       <div className="absolute bottom-6 right-6 w-6 h-6 border-b border-r border-blue-500/40"></div>
+
+                       <div className="mt-12 mb-auto flex flex-col items-center text-center">
+                          <span className="text-[8px] tracking-[1em] opacity-30 italic block mb-6 uppercase font-sans leading-none">{specimen.titleYomi}</span>
+                          <h3 className="text-3xl font-light tracking-[0.25em] mb-8 leading-tight">{specimen.title}</h3>
+                          <div className="w-12 h-px bg-blue-500/30 mb-8"></div>
+                          <p className="text-lg leading-[2] font-light italic opacity-80 px-4">「{specimen.teigi}」</p>
+                       </div>
+
+                       <div className="mt-auto flex justify-between items-end border-t border-current/5 pt-8">
+                          <div className="flex flex-col gap-2">
+                             <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 bg-blue-500 rotate-45"></div>
+                                <span className="text-[8px] font-black tracking-[0.4em] uppercase font-sans">G.E.D.A. Log</span>
+                             </div>
+                             <span className="text-[7px] font-mono opacity-20 uppercase tracking-widest">{msTime.split(' ')[0]}</span>
+                          </div>
+                          <div className="text-right flex flex-col items-end gap-1 opacity-20">
+                             <Fingerprint size={12} />
+                             <span className="text-[6px] font-mono uppercase tracking-tighter">{userId}</span>
+                          </div>
+                       </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* アクションパネル */}
+                <div className="w-full max-w-[340px] space-y-4 font-sans">
+                   <div className="flex items-center justify-between mb-2">
+                      <span className="text-[8px] tracking-[0.4em] opacity-30 uppercase font-black italic">Distribution protocol</span>
+                      <div className="flex gap-2">
+                         <div className={`w-1 h-1 rounded-full ${activeTab === 'observation' ? 'bg-blue-500 animate-pulse' : 'bg-current/10'}`}></div>
+                         <div className={`w-1 h-1 rounded-full ${activeTab === 'post' ? 'bg-blue-500 animate-pulse' : 'bg-current/10'}`}></div>
+                      </div>
+                   </div>
+
+                   <button 
+                     onClick={copyToClipboard}
+                     className={`w-full py-5 flex items-center justify-between px-8 border transition-all relative overflow-hidden group
+                     ${isCopied ? 'border-green-500 bg-green-500/5 text-green-500' : 'border-blue-500/20 bg-blue-500/5 text-blue-500/80 hover:text-blue-500 hover:bg-blue-500/10'}`}
+                   >
+                     <div className="flex items-center gap-4">
+                        {isCopied ? <Check size={16} /> : <Copy size={16} />}
+                        <span className="text-[10px] font-bold tracking-[0.4em] uppercase">{isCopied ? 'Link Copied' : 'Copy Specimen Link'}</span>
+                     </div>
+                     <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all" />
+                   </button>
+
+                   <div className="grid grid-cols-2 gap-4">
+                      <button 
+                        onClick={() => setActiveTab(activeTab === 'observation' ? 'post' : 'observation')}
+                        className={`py-4 border ${theme.border} text-[9px] font-bold tracking-[0.2em] uppercase opacity-60 hover:opacity-100 flex items-center justify-center gap-3 transition-all`}
+                      >
+                         {activeTab === 'observation' ? <Maximize2 size={12} /> : <PlayCircle size={12} />}
+                         {activeTab === 'observation' ? 'View Card' : 'View Stream'}
+                      </button>
+                      <a 
+                        href={`https://youtube.com/shorts/${VIDEO_ID}`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="py-4 bg-red-600/10 border border-red-600/20 text-red-500/80 hover:text-red-500 text-[9px] font-bold tracking-[0.2em] uppercase flex items-center justify-center gap-3 transition-all"
+                      >
+                         <Youtube size={12} /> Full Story
+                      </a>
+                   </div>
+                </div>
+             </div>
+
+             {/* Decoration */}
+             <div className="absolute -right-20 top-1/2 -translate-y-1/2 rotate-90 hidden xl:block pointer-events-none">
+                <span className="text-[8px] tracking-[2.5em] opacity-[0.03] font-black uppercase whitespace-nowrap">PHASE_LIQUID_OBSERVATION_CONTINUOUS_SYNC</span>
+             </div>
+          </section>
+        </div>
+      </main>
+
+      {/* 3. Footer (Terminal Layer) */}
+      <footer className={`h-16 border-t ${theme.border} bg-current/[0.02] flex items-center justify-between px-10 relative z-[100]`}>
+        <div className="flex items-center gap-4 opacity-20">
+           <Shield size={12} strokeWidth={1} />
+           <span className="text-[8px] font-mono tracking-widest uppercase">Encryption: GEDA-009-X</span>
+        </div>
+        <div className="text-[9px] tracking-[0.6em] italic opacity-30 font-serif px-8 truncate max-w-lg hidden md:block">
+           {specimen.lastWord}
+        </div>
+        <div className="flex items-center gap-6 opacity-40 hover:opacity-100 transition-opacity">
+           <Music2 size={14} strokeWidth={1} className="animate-spin-slow" />
+           <span className="text-[8px] font-bold font-sans tracking-[0.3em] uppercase">Void Sound Synchronized</span>
+        </div>
+      </footer>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes spin-slow {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow { animation: spin-slow 10s linear infinite; }
+        .animate-fade-in { animation: fadeIn 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes fadeIn { 
+          from { opacity: 0; transform: translateY(10px); filter: blur(4px); } 
+          to { opacity: 1; transform: translateY(0); filter: blur(0); } 
+        }
+        ::-webkit-scrollbar { width: 3px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.2); }
+        .font-sans { font-family: 'Inter', system-ui, sans-serif; }
+      `}} />
+    </div>
+  );
+};
+
+export default App;
