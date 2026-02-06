@@ -1,0 +1,298 @@
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import * as THREE from 'three';
+import { 
+  Volume2, VolumeX, Settings, CheckCircle2, Circle,
+  Clock, Cpu, Database, Eye, Search, Grid, List, Map as MapIcon,
+  Heart, Tag, Navigation2, X
+} from 'lucide-react';
+
+/**
+ * CONFIG: システム設定 (保守運用五則 第2条)
+ */
+const CONFIG = {
+  APP_ID: 'GEDA-GEO-THREEJS-V2-5-1',
+  VERSION: '2.5.1-THREEJS-INTEGRATED',
+  THEMES: {
+    yomi: 'text-cyan-400',
+    teigi: 'text-fuchsia-400',
+    resonance: 'text-rose-500',
+    tag: 'text-cyan-500/60',
+    accent: '#00ffff'
+  }
+};
+
+const toBase36 = (num) => num.toString(36).toUpperCase();
+
+/**
+ * 3D Globe Component using Three.js
+ */
+const DigitalGlobe = ({ data, onPointClick }) => {
+  const mountRef = useRef(null);
+
+  useEffect(() => {
+    const width = mountRef.current.clientWidth;
+    const height = mountRef.current.clientHeight;
+
+    // Scene setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    camera.position.z = 250;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(width, height);
+    mountRef.current.appendChild(renderer.domElement);
+
+    // Globe Geometry (Wireframe)
+    const geometry = new THREE.SphereGeometry(100, 32, 32);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x00ffff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.15
+    });
+    const globe = new THREE.Mesh(geometry, material);
+    scene.add(globe);
+
+    // Inner Glow Sphere
+    const innerGeom = new THREE.SphereGeometry(99, 32, 32);
+    const innerMat = new THREE.MeshBasicMaterial({
+      color: 0x000a1a,
+      transparent: true,
+      opacity: 0.8
+    });
+    scene.add(new THREE.Mesh(innerGeom, innerMat));
+
+    // Markers (Points)
+    const pointsGroup = new THREE.Group();
+    scene.add(pointsGroup);
+
+    const latLngToVector3 = (lat, lng, radius) => {
+      const phi = (90 - lat) * (Math.PI / 180);
+      const theta = (lng + 180) * (Math.PI / 180);
+      const x = -(radius * Math.sin(phi) * Math.cos(theta));
+      const z = radius * Math.sin(phi) * Math.sin(theta);
+      const y = radius * Math.cos(phi);
+      return new THREE.Vector3(x, y, z);
+    };
+
+    data.forEach(item => {
+      const pos = latLngToVector3(item.location.lat, item.location.lng, 100);
+      
+      // The Marker point
+      const pointGeom = new THREE.SphereGeometry(1.5, 8, 8);
+      const pointMat = new THREE.MeshBasicMaterial({ color: 0xff007f });
+      const point = new THREE.Mesh(pointGeom, pointMat);
+      point.position.copy(pos);
+      pointsGroup.add(point);
+
+      // Light Beam (Cylinder)
+      const beamGeom = new THREE.CylinderGeometry(0.2, 0.2, 20, 8);
+      beamGeom.translate(0, 10, 0); // Origin at bottom
+      const beamMat = new THREE.MeshBasicMaterial({ 
+        color: 0x00ffff, 
+        transparent: true, 
+        opacity: 0.4 
+      });
+      const beam = new THREE.Mesh(beamGeom, beamMat);
+      beam.position.copy(pos);
+      beam.lookAt(new THREE.Vector3(0,0,0));
+      beam.rotateX(Math.PI / 2);
+      pointsGroup.add(beam);
+    });
+
+    // Interaction vars
+    let isDragging = false;
+    let previousMousePosition = { x: 0, y: 0 };
+
+    const handleMouseDown = () => isDragging = true;
+    const handleMouseUp = () => isDragging = false;
+    const handleMouseMove = (e) => {
+      if (isDragging) {
+        const deltaMove = {
+          x: e.offsetX - previousMousePosition.x,
+          y: e.offsetY - previousMousePosition.y
+        };
+        globe.rotation.y += deltaMove.x * 0.005;
+        globe.rotation.x += deltaMove.y * 0.005;
+        pointsGroup.rotation.y += deltaMove.x * 0.005;
+        pointsGroup.rotation.x += deltaMove.y * 0.005;
+      }
+      previousMousePosition = { x: e.offsetX, y: e.offsetY };
+    };
+
+    mountRef.current.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mouseup', handleMouseUp);
+    mountRef.current.addEventListener('mousemove', handleMouseMove);
+
+    // Animation loop
+    const animate = () => {
+      requestAnimationFrame(animate);
+      if (!isDragging) {
+        globe.rotation.y += 0.001;
+        pointsGroup.rotation.y += 0.001;
+      }
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    return () => {
+      mountRef.current?.removeChild(renderer.domElement);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [data]);
+
+  return <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />;
+};
+
+const App = () => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isSpeechEnabled, setIsSpeechEnabled] = useState(false);
+  const [viewMode, setViewMode] = useState('focus'); // focus, grid, map
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedSpecimen, setSelectedSpecimen] = useState(null);
+  
+  const [archiveData] = useState([
+    { id: "KHJ-001", title: "雨の予感", yomi: "あめのよかん", teigi: "湿度が閾値を超えた瞬間、肺の奥がわずかに重くなる現象。", tags: ["環境", "気象", "身体"], location: { lat: 35.6895, lng: 139.6917 }, resonance: 1285 },
+    { id: "KHJ-002", title: "階段の消失", yomi: "かいだんのしょうしつ", teigi: "存在しない最後の一段を踏み抜く錯覚。", tags: ["身体", "バグ", "都市"], location: { lat: 34.6937, lng: 135.5023 }, resonance: 45 },
+    { id: "KHJ-003", title: "残光の残滓", yomi: "ざんこうのざんし", teigi: "目を閉じても残り続ける不定形の斑点。", tags: ["視覚", "神経", "光"], location: { lat: 35.0116, lng: 135.7681 }, resonance: 1023 },
+    { id: "KHJ-004", title: "静寂の耳鳴り", yomi: "せいじゃくのみみなり", teigi: "無音の部屋で聴覚が自らを増幅させる音。", tags: ["聴覚", "心理", "沈黙"], location: { lat: 43.0621, lng: 141.3544 }, resonance: 256 },
+    { id: "KHJ-005", title: "潮騒の幻聴", yomi: "しおさいのげんちょう", teigi: "都会の喧騒がふとした瞬間に波音に置換される感覚。", tags: ["聴覚", "記憶", "海洋"], location: { lat: 33.5902, lng: 130.4017 }, resonance: 882 },
+  ]);
+
+  const filteredSpecimens = useMemo(() => {
+    return archiveData.filter(s => 
+      s.title.includes(searchQuery) || 
+      s.id.includes(searchQuery) || 
+      s.tags.some(t => t.includes(searchQuery))
+    );
+  }, [archiveData, searchQuery]);
+
+  return (
+    <div className="fixed inset-0 bg-[#020202] text-[#e0e0e0] font-serif overflow-hidden select-none">
+      {/* HEADER */}
+      <header className="absolute top-0 w-full h-16 border-b border-white/5 flex items-center justify-between px-8 z-[100] bg-black/40 backdrop-blur-md">
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></div>
+              <span className="text-[10px] font-black tracking-[0.4em] uppercase italic text-white/90">G.E.D.A. DUAL</span>
+            </div>
+            <span className="text-[7px] font-mono opacity-30 tracking-[0.2em]">{CONFIG.VERSION}</span>
+          </div>
+
+          <div className="relative group">
+            <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-cyan-400 transition-colors" />
+            <input 
+              type="text"
+              placeholder="探索... (#タグ)"
+              className="bg-white/5 border border-white/10 rounded-full pl-10 pr-4 py-1.5 text-[10px] w-48 focus:w-64 focus:outline-none focus:border-cyan-500/50 transition-all duration-500 font-sans"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="flex p-1 bg-white/5 rounded-sm border border-white/5">
+            <button onClick={() => setViewMode('focus')} className={`p-1.5 transition-all ${viewMode === 'focus' ? 'bg-white/10 text-white' : 'text-white/20'}`}><Eye size={14} /></button>
+            <button onClick={() => setViewMode('grid')} className={`p-1.5 transition-all ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/20'}`}><Grid size={14} /></button>
+            <button onClick={() => setViewMode('map')} className={`p-1.5 transition-all ${viewMode === 'map' ? 'bg-white/10 text-white' : 'text-white/20'}`}><MapIcon size={14} /></button>
+          </div>
+          <button onClick={() => setIsSpeechEnabled(!isSpeechEnabled)} className={`flex items-center gap-3 px-4 py-2 rounded border transition-all ${isSpeechEnabled ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400' : 'border-white/5 text-white/20'}`}>
+            {isSpeechEnabled ? <Volume2 size={12} /> : <VolumeX size={12} />}
+            <span className="text-[8px] font-bold tracking-widest uppercase italic">SYNC</span>
+          </button>
+        </div>
+      </header>
+
+      {/* MAIN CONTENT */}
+      <main className="h-full w-full relative">
+        {viewMode === 'map' ? (
+          <div className="h-full w-full relative">
+            <DigitalGlobe data={filteredSpecimens} onPointClick={setSelectedSpecimen} />
+            
+            {/* Overlay Info */}
+            <div className="absolute top-24 left-10 pointer-events-none">
+              <h2 className="text-3xl font-thin tracking-[0.4em] text-cyan-400/80 uppercase">Geo-Sync</h2>
+              <p className="text-[9px] font-mono text-white/30 tracking-widest mt-2 uppercase italic">Global phenomena visualization active.</p>
+            </div>
+
+            {/* Bottom Legend */}
+            <div className="absolute bottom-12 right-12 space-y-4">
+              {filteredSpecimens.map(s => (
+                <div key={s.id} className="flex flex-col items-end border-r border-cyan-500/20 pr-4 py-1">
+                  <span className="text-[7px] font-mono text-cyan-500">[{s.location.lat}, {s.location.lng}]</span>
+                  <span className="text-[10px] text-white/60 tracking-wider">{s.title}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : viewMode === 'focus' ? (
+          <div className="h-full w-full flex items-center justify-center pt-16">
+            {filteredSpecimens.map((s, idx) => (
+              <div 
+                key={s.id}
+                className="absolute inset-0 px-12 flex flex-col justify-center transition-all duration-1000"
+                style={{ 
+                  transform: `translateY(${(idx - currentIndex) * 100}%)`,
+                  opacity: idx === currentIndex ? 1 : 0
+                }}
+              >
+                <div className="max-w-3xl mx-auto w-full space-y-8 relative">
+                  <div className="absolute -right-32 top-1/2 -translate-y-1/2">
+                    <div className="flex flex-col items-center">
+                      <span className="text-[7px] font-mono tracking-[0.4em] text-rose-500/40 mb-1">RES</span>
+                      <span className="text-5xl font-mono font-thin text-rose-500">{toBase36(s.resonance)}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex gap-2">
+                      {s.tags.map(tag => (
+                        <span key={tag} className="text-[8px] font-mono border border-cyan-500/30 px-3 py-1 rounded-full text-cyan-400/80">#{tag}</span>
+                      ))}
+                    </div>
+                    <h1 className="text-7xl font-extralight tracking-tighter text-white">{s.title}</h1>
+                    <span className="text-[12px] tracking-[1.2em] block text-cyan-400 opacity-60 uppercase">{s.yomi}</span>
+                  </div>
+                  <p className="text-3xl leading-relaxed italic text-white/90 border-l-2 border-fuchsia-600 pl-8">{s.teigi}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="h-full w-full p-24 overflow-y-auto grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 pt-32">
+            {filteredSpecimens.map((s, idx) => (
+              <button key={s.id} onClick={() => { setCurrentIndex(idx); setViewMode('focus'); }} className="aspect-square border border-white/5 p-6 flex flex-col justify-between hover:border-cyan-500/50 hover:bg-cyan-500/5 group transition-all duration-500">
+                <span className="text-[8px] font-mono text-white/20">{s.id}</span>
+                <span className="text-[12px] text-left leading-tight group-hover:text-cyan-400 transition-colors">{s.title}</span>
+                <div className="flex justify-between items-center opacity-40">
+                  <span className="text-[8px] italic">#{s.tags[0]}</span>
+                  <span className="text-[10px] font-mono">{toBase36(s.resonance)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {/* FOOTER NAV */}
+      <footer className="absolute bottom-8 left-12 right-12 flex justify-between items-end z-[110] pointer-events-none">
+        <div className="flex flex-col gap-1">
+          <span className="text-[7px] font-mono opacity-20 tracking-[0.3em]">GEOGRAPHICAL INDEX</span>
+          <span className="text-[10px] font-mono text-cyan-400/60 uppercase">System: Ready</span>
+        </div>
+        <div className="flex gap-3 pointer-events-auto">
+          {filteredSpecimens.map((_, i) => (
+            <button 
+              key={i} 
+              onClick={() => setCurrentIndex(i)}
+              className={`h-1 transition-all duration-700 ${i === currentIndex ? 'w-12 bg-cyan-400' : 'w-2 bg-white/10'}`}
+            ></button>
+          ))}
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default App;
