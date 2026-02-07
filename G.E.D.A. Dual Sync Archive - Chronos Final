@@ -11,7 +11,7 @@ import {
  * CONFIG: システム設定 (保守運用五則 第2条-1)
  */
 const CONFIG = {
-  VERSION_NAME: "V.3.2.5-CHRONOS-REFINED",
+  VERSION_NAME: "V.3.2.6-CHRONOS-REFINED",
   TAG_COLORS: {
     '環境': { h: 180, s: 80, l: 50 },
     '身体': { h: 300, s: 80, l: 50 },
@@ -281,11 +281,17 @@ const MassivePointsGlobe = ({ data, settings, theme }) => {
  */
 const PrecisionClock = ({ theme, config, isMainMode, lang = 'jp' }) => {
   const [time, setTime] = useState(new Date());
+
+  /**
+   * ミリ秒更新ロジックの修正
+   * メインモード時、またはフッター表示でもミリ秒を表示する場合は高頻度で更新する
+   */
   useEffect(() => {
-    const interval = config.showMilli ? 16 : 1000;
+    const isMilliActive = isMainMode ? config.showMilli : true; // フッター側は常にミリ秒を表示するためtrue
+    const interval = isMilliActive ? 16 : 1000;
     const timer = setInterval(() => setTime(new Date()), interval);
     return () => clearInterval(timer);
-  }, [config.showMilli]);
+  }, [isMainMode, config.showMilli]);
 
   const h = time.getHours();
   const m = time.getMinutes();
@@ -296,6 +302,7 @@ const PrecisionClock = ({ theme, config, isMainMode, lang = 'jp' }) => {
   
   const dayStr = CONFIG.LANG[lang].days[dw];
 
+  // フッター用ミニマル表示
   if (!isMainMode) {
     return (
       <div className={`font-mono text-[9px] tracking-[0.3em] flex items-center gap-2 opacity-60 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
@@ -368,7 +375,7 @@ const PrecisionClock = ({ theme, config, isMainMode, lang = 'jp' }) => {
     );
   }
 
-  // デジタルモード (書体干渉の修正: コロンのマージン調整)
+  // デジタルモード (書体干渉の修正済)
   return (
     <div className={`flex flex-col items-center justify-center transition-all duration-1000 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`} style={containerStyle}>
       <div className="flex items-baseline">
@@ -571,7 +578,7 @@ const App = () => {
       {/* 3D Canvas Container */}
       <MassivePointsGlobe data={archiveData} settings={settings} theme={theme} />
 
-      {/* Footer Status Bar */}
+      {/* Footer Status Bar (左下のデジタル時計) */}
       <footer className="absolute bottom-10 left-10 z-50 transition-all duration-1000">
           <div className={`p-3 backdrop-blur-3xl rounded-xl border border-white/5 flex items-center gap-5 transition-all duration-1000 ${clockMode ? 'opacity-20 translate-y-2' : 'opacity-100'} ${currentTheme.ui}`}>
              <div className="flex items-center gap-2">
@@ -581,6 +588,7 @@ const App = () => {
                </span>
              </div>
              <div className="w-[1px] h-3 bg-white/5" />
+             {/* ミリ秒が止まっていた箇所を修正済み */}
              <PrecisionClock theme={theme} config={clockConfig} isMainMode={false} lang={lang} />
           </div>
       </footer>
