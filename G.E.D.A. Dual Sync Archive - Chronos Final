@@ -325,10 +325,10 @@ const PrecisionClock = ({ theme, config, isMainMode, lang = 'jp' }) => {
     transform: `scale(${config.clockSize})`
   };
 // 秒針の動き
-  if (config.clockType === 'analog') {
-    const hDeg = (h % 12) * 30 + m * 0.5;
-    const mDeg = m * 6;
-    const sDeg = s * 6 + ms * 0.006;
+ if (config.clockType === 'analog') {
+  const hDeg = (h % 12) * 30 + m * 0.5 + s * (0.5 / 60);
+const mDeg = m * 6 + s * 0.1 + ms * 0.0001;
+const sDeg = s * 6 + ms * 0.006;
 
     const renderIndex = () => {
       if (config.indexType === 'none') return null;
