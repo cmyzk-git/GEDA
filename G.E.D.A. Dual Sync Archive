@@ -2,15 +2,16 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { 
   Settings2, Sun, Moon, RotateCw, Globe, 
-  Zap, Palette, Maximize2, Activity, Languages,
-  Hash, Shield, Cpu, Wind, Clock, Compass, Grid
+  Zap, Maximize2, Activity, Languages,
+  Hash, Shield, Cpu, Wind, Clock, Compass, Grid,
+  Maximize
 } from 'lucide-react';
 
 /**
  * CONFIG: システム設定 (保守運用五則 第2条：設定の外部化)
  */
 const CONFIG = {
-  VERSION_NAME: "V.3.1.2-ZEITGEIST",
+  VERSION_NAME: "V.3.1.3-ZEITGEIST",
   TAG_COLORS: {
     '環境': { h: 180, s: 80, l: 50 },
     '身体': { h: 300, s: 80, l: 50 },
@@ -22,14 +23,14 @@ const CONFIG = {
   GLOBE_RADIUS: 100,
   CAMERA_DIST: 280,
   EARTH_ROT_BASE: 0.0000012,
-  FRICTION: 0.95, // 慣性の摩擦係数
-  RETURN_LERP: 0.02, // 定常速度への復帰係数
+  FRICTION: 0.95,
+  RETURN_LERP: 0.02,
   LANG: {
     jp: {
       title: "G.E.D.A. デュアル・シンクロ・アーカイブ",
       visual: "視覚構成",
       motion: "時間軸・自転",
-      saturation: "彩度",
+      globeScale: "地球儀サイズ",
       luminance: "輝度",
       pointSize: "粒子サイズ",
       gridDensity: "グリッド密度",
@@ -46,7 +47,7 @@ const CONFIG = {
       title: "G.E.D.A. DUAL SYNC ARCHIVE",
       visual: "Visual",
       motion: "Motion",
-      saturation: "Saturation",
+      globeScale: "Globe Scale",
       luminance: "Luminance",
       pointSize: "Point Magnitude",
       gridDensity: "Grid Density",
@@ -79,7 +80,7 @@ const CONFIG = {
 };
 
 /**
- * 3D Globe Component with Interactivity (Drag with Inertia & Gyro)
+ * 3D Globe Component
  */
 const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
   const mountRef = useRef(null);
@@ -91,10 +92,9 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
   const sceneRef = useRef(new THREE.Scene());
   const settingsRef = useRef(settings);
   
-  // 物理挙動用リファレンス
   const isDragging = useRef(false);
   const previousMousePosition = useRef({ x: 0, y: 0 });
-  const velocity = useRef({ x: 0, y: 0 }); // ドラッグによる回転速度
+  const velocity = useRef({ x: 0, y: 0 });
   const gyroOffset = useRef({ x: 0, y: 0 });
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
@@ -176,24 +176,13 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
     pointsRef.current = points;
     globeGroupRef.current.add(points);
 
-    const handleOrientation = (event) => {
-      if (!gyroEnabled) return;
-      const x = event.beta;
-      const y = event.gamma;
-      if (x !== null && y !== null) {
-        gyroOffset.current.x = x * 0.01;
-        gyroOffset.current.y = y * 0.01;
-      }
-    };
-    window.addEventListener('deviceorientation', handleOrientation);
-
     const onMouseDown = (e) => {
       isDragging.current = true;
       previousMousePosition.current = { 
         x: e.clientX || e.touches?.[0].clientX, 
         y: e.clientY || e.touches?.[0].clientY 
       };
-      velocity.current = { x: 0, y: 0 }; // タッチ開始時に速度リセット
+      velocity.current = { x: 0, y: 0 };
     };
 
     const onMouseMove = (e) => {
@@ -202,20 +191,13 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
       const clientY = e.clientY || e.touches?.[0].clientY;
       const deltaX = clientX - previousMousePosition.current.x;
       const deltaY = clientY - previousMousePosition.current.y;
-      
-      // 直接回転を加算
       interactionGroupRef.current.rotation.y += deltaX * 0.005;
       interactionGroupRef.current.rotation.x += deltaY * 0.005;
-      
-      // 速度を蓄積
       velocity.current = { x: deltaX * 0.005, y: deltaY * 0.005 };
-      
       previousMousePosition.current = { x: clientX, y: clientY };
     };
 
-    const onMouseUp = () => {
-      isDragging.current = false;
-    };
+    const onMouseUp = () => { isDragging.current = false; };
 
     mountRef.current.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
@@ -227,29 +209,15 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
     let frameId;
     const animate = () => {
       frameId = requestAnimationFrame(animate);
-      
-      // 1. 地球儀の自転（設定された定常速度）
       const baseSpeed = settingsRef.current.rotationSpeed * CONFIG.EARTH_ROT_BASE;
       globeGroupRef.current.rotation.y += baseSpeed;
 
-      // 2. ドラッグ慣性・復帰システム
       if (!isDragging.current) {
-        // 慣性による回転の継続
         interactionGroupRef.current.rotation.y += velocity.current.x;
         interactionGroupRef.current.rotation.x += velocity.current.y;
-
-        // 摩擦による減衰
         velocity.current.x *= CONFIG.FRICTION;
         velocity.current.y *= CONFIG.FRICTION;
-
-        // X軸（垂直方向）の回転を徐々に0に戻す（水平自転に収束させるため）
         interactionGroupRef.current.rotation.x *= (1 - CONFIG.RETURN_LERP);
-      }
-
-      // 3. ジャイロ同期
-      if (gyroEnabled) {
-        interactionGroupRef.current.rotation.x += (gyroOffset.current.x - interactionGroupRef.current.rotation.x) * 0.05;
-        interactionGroupRef.current.rotation.y += (gyroOffset.current.y - interactionGroupRef.current.rotation.y) * 0.05;
       }
 
       renderer.render(scene, camera);
@@ -267,14 +235,13 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
     return () => {
       cancelAnimationFrame(frameId);
       window.removeEventListener('resize', handleResize);
-      window.removeEventListener('deviceorientation', handleOrientation);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('touchmove', onMouseMove);
       window.removeEventListener('touchend', onMouseUp);
       renderer.dispose();
     };
-  }, [data, gyroEnabled]);
+  }, [data]);
 
   useEffect(() => {
     updateGridGeometry(settings.gridDensity);
@@ -282,11 +249,15 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
 
   useEffect(() => {
     if (!pointsRef.current) return;
+    // 地球儀のサイズ（Scale）を適用
+    globeGroupRef.current.scale.set(settings.globeScale, settings.globeScale, settings.globeScale);
+
     const colorsAttr = pointsRef.current.geometry.attributes.color;
     data.forEach((item, i) => {
       const base = CONFIG.TAG_COLORS[item.tags[0]] || CONFIG.TAG_COLORS.default;
       const color = new THREE.Color();
-      color.setHSL(base.h / 360, (base.s / 100) * settings.saturation, (base.l / 100) * settings.luminance);
+      // 彩度は削除されたため、元のCONFIG値をベースに輝度(luminance)のみを乗算
+      color.setHSL(base.h / 360, base.s / 100, (base.l / 100) * settings.luminance);
       colorsAttr.setXYZ(i, color.r, color.g, color.b);
     });
     colorsAttr.needsUpdate = true;
@@ -296,17 +267,16 @@ const MassivePointsGlobe = ({ data, settings, theme, gyroEnabled }) => {
       globeMeshRef.current.material.opacity = settings.gridOpacity;
       globeMeshRef.current.material.color.setHex(CONFIG.THEMES[theme].gridColor);
     }
-  }, [settings.saturation, settings.luminance, settings.pointSize, settings.gridOpacity, theme, data]);
+  }, [settings.globeScale, settings.luminance, settings.pointSize, settings.gridOpacity, theme, data]);
 
   return <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />;
 };
 
 /**
- * Clock Component (精密時計)
+ * Precision Clock
  */
 const PrecisionClock = ({ theme, isClockMode }) => {
   const [time, setTime] = useState(new Date());
-
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 10);
     return () => clearInterval(timer);
@@ -356,7 +326,7 @@ const PrecisionClock = ({ theme, isClockMode }) => {
 };
 
 /**
- * Main Application
+ * Main App
  */
 const App = () => {
   const [theme, setTheme] = useState('dark');
@@ -367,9 +337,9 @@ const App = () => {
   const [gyroEnabled, setGyroEnabled] = useState(false);
 
   const [settings, setSettings] = useState({
+    globeScale: 1.0,
     pointSize: 3.5,
     luminance: 1.5,
-    saturation: 1.2,
     opacity: 0.8,
     rotationSpeed: 1.0,
     gridOpacity: 0.15,
@@ -380,27 +350,14 @@ const App = () => {
   const currentTheme = CONFIG.THEMES[theme];
 
   const archiveData = useMemo(() => [
-    { id: "S-101", tags: ["環境"], location: { lat: 35.6, lng: 139.7 }, val: "0.82" },
-    { id: "S-102", tags: ["身体"], location: { lat: 48.8, lng: 2.3 }, val: "0.45" },
-    { id: "S-103", tags: ["視覚"], location: { lat: 40.7, lng: -74.0 }, val: "0.91" },
-    { id: "S-104", tags: ["聴覚"], location: { lat: -33.8, lng: 151.2 }, val: "0.33" },
-    { id: "S-105", tags: ["心理"], location: { lat: 55.7, lng: 37.6 }, val: "0.77" },
-    { id: "S-106", tags: ["心理"], location: { lat: 34.6, lng: 135.5 }, val: "0.99" },
-    { id: "S-107", tags: ["環境"], location: { lat: -23.5, lng: -46.6 }, val: "0.12" },
+    { id: "S-101", tags: ["環境"], location: { lat: 35.6, lng: 139.7 } },
+    { id: "S-102", tags: ["身体"], location: { lat: 48.8, lng: 2.3 } },
+    { id: "S-103", tags: ["視覚"], location: { lat: 40.7, lng: -74.0 } },
+    { id: "S-104", tags: ["聴覚"], location: { lat: -33.8, lng: 151.2 } },
+    { id: "S-105", tags: ["心理"], location: { lat: 55.7, lng: 37.6 } },
+    { id: "S-106", tags: ["心理"], location: { lat: 34.6, lng: 135.5 } },
+    { id: "S-107", tags: ["環境"], location: { lat: -23.5, lng: -46.6 } },
   ], []);
-
-  const requestGyro = async () => {
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-      try {
-        const response = await DeviceOrientationEvent.requestPermission();
-        if (response === 'granted') setGyroEnabled(true);
-      } catch (e) {
-        console.error(e);
-      }
-    } else {
-      setGyroEnabled(!gyroEnabled);
-    }
-  };
 
   return (
     <div className={`fixed inset-0 font-sans transition-all duration-1000 overflow-hidden select-none`} style={{ background: currentTheme.bg }}>
@@ -461,8 +418,8 @@ const App = () => {
           <div className="space-y-10">
             {activeTab === 'visual' ? (
               <>
-                <SliderItem label={t.saturation} icon={<Palette size={14}/>} value={settings.saturation} min={0} max={2} step={0.01}
-                  onChange={v => setSettings(s => ({...s, saturation: v}))} />
+                <SliderItem label={t.globeScale} icon={<Maximize size={14}/>} value={settings.globeScale} min={0.5} max={2.5} step={0.01}
+                  onChange={v => setSettings(s => ({...s, globeScale: v}))} />
                 <SliderItem label={t.luminance} icon={<Zap size={14}/>} value={settings.luminance} min={0.5} max={2.5} step={0.01}
                   onChange={v => setSettings(s => ({...s, luminance: v}))} />
                 <SliderItem label={t.pointSize} icon={<Maximize2 size={14}/>} value={settings.pointSize} min={0.5} max={10} step={0.1}
@@ -476,9 +433,6 @@ const App = () => {
               <>
                 <SliderItem label={t.rotationSpeed} icon={<RotateCw size={14}/>} value={settings.rotationSpeed} min={1} max={5000} step={1}
                   onChange={v => setSettings(s => ({...s, rotationSpeed: v}))} />
-                <div className="flex flex-col gap-4">
-                  <ToggleButton label={t.gyroActive} active={gyroEnabled} icon={<Compass size={14}/>} onClick={requestGyro} />
-                </div>
               </>
             )}
           </div>
@@ -497,10 +451,8 @@ const App = () => {
                </span>
              </div>
              <div className="w-[1px] h-4 bg-white/10" />
-             
              <PrecisionClock theme={theme} isClockMode={false} />
           </div>
-
           <div className={`border-l-[3px] border-cyan-500 pl-6 py-1 transition-all duration-1000 ${clockMode ? 'opacity-0' : 'opacity-100'}`}>
             <div className={`text-xs font-bold font-mono tracking-[0.25em] ${currentTheme.text}`}>
               {settings.rotationSpeed === 1.0 ? t.rotationMatch : t.rotationAccel}
@@ -519,21 +471,12 @@ const App = () => {
       </div>
 
       <style>{`
-        @keyframes spin-slow {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        .animate-spin-slow {
-          animation: spin-slow 8s linear infinite;
-        }
+        @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .animate-spin-slow { animation: spin-slow 8s linear infinite; }
         input[type='range']::-webkit-slider-thumb {
           -webkit-appearance: none;
-          height: 16px;
-          width: 16px;
-          border-radius: 50%;
-          background: #06b6d4;
-          box-shadow: 0 0 10px #06b6d488;
-          cursor: pointer;
+          height: 16px; width: 16px; border-radius: 50%;
+          background: #06b6d4; box-shadow: 0 0 10px #06b6d488; cursor: pointer;
         }
         body { margin: 0; padding: 0; background: black; touch-action: none; }
       `}</style>
@@ -551,15 +494,6 @@ const SliderItem = ({ label, icon, value, min, max, step, onChange }) => (
       onChange={e => onChange(parseFloat(e.target.value))}
       className="w-full h-[2px] bg-current/10 rounded-full appearance-none cursor-pointer accent-cyan-500" />
   </div>
-);
-
-const ToggleButton = ({ label, icon, active, onClick }) => (
-  <button onClick={onClick} className={`flex items-center justify-between w-full p-4 rounded-2xl border transition-all ${active ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400' : 'border-white/5 opacity-40 hover:opacity-100'}`}>
-    <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest">
-      {icon} {label}
-    </div>
-    <div className={`w-2 h-2 rounded-full ${active ? 'bg-cyan-400 animate-pulse' : 'bg-white/20'}`} />
-  </button>
 );
 
 export default App;
